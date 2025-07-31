@@ -89,20 +89,23 @@ const TimePickerPopover = ({
 
     // --- Logic for Dropoff Time Picker ---
     if (isDropoff && pickupDate && dropoffDate && pickupTime) {
-        const nextDayAfterPickup = new Date(pickupDate);
-        nextDayAfterPickup.setDate(pickupDate.getDate() + 1);
+  // Only apply restriction when dropoff is same day as pickup
+  if (isSameDay(pickupDate, dropoffDate)) {
+    const [pickupHour, pickupMinute] = pickupTime.split(':').map(Number);
+    const pickupTotalMinutes = pickupHour * 60 + pickupMinute;
+    const minDropoffMinutes = pickupTotalMinutes + 360; // 6 hours
 
-        // If dropoff is the day right after pickup, enforce time to ensure a 24h minimum rental.
-        if (isSameDay(dropoffDate, nextDayAfterPickup)) {
-            const [pickupHour] = pickupTime.split(':').map(Number);
-            return BUSINESS_HOURS.filter(time => {
-                const [dropoffHour] = time.split(':').map(Number);
-                return dropoffHour >= pickupHour;
-            });
-        }
-        // For dropoff dates more than one day after pickup, all business hours are available.
-        return BUSINESS_HOURS;
-    }
+    return BUSINESS_HOURS.filter(time => {
+      const [dropoffHour, dropoffMinute] = time.split(':').map(Number);
+      const dropoffTotalMinutes = dropoffHour * 60 + dropoffMinute;
+      return dropoffTotalMinutes >= minDropoffMinutes;
+    });
+  }
+
+  // If it's not the same day, allow all time slots
+  return BUSINESS_HOURS;
+}
+
 
     // Default case: return all business hours if props aren't ready
     return BUSINESS_HOURS;

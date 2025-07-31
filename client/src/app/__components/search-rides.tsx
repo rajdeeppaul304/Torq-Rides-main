@@ -50,22 +50,17 @@ const getInitialTimes = () => {
   }
   const pickupTime = `${String(pickupHour).padStart(2, "0")}:00`;
 
-  // let dropoffHour = pickupHour + 4;
-  // if (dropoffHour > 22) {
-  //   dropoffHour = 22;
-  // }
-  // const dropoffTime = `${String(dropoffHour).padStart(2, "0")}:00`;
-
-  // return {
-  //   pickupDate,
-  //   dropoffDate: new Date(pickupDate),
-  //   pickupTime,
-  //   dropoffTime,
-  // };
-
-  const dropoffDate = new Date(pickupDate);
-  dropoffDate.setDate(dropoffDate.getDate() + 1);
-  const dropoffTime = pickupTime;
+  // Set dropoff for same day with 6-hour minimum
+  let dropoffHour = pickupHour + 6;
+  let dropoffDate = new Date(pickupDate);
+  
+  // If 6 hours later goes past 22:00, move to next day
+  if (dropoffHour > 22) {
+    dropoffDate.setDate(dropoffDate.getDate() + 1);
+    dropoffHour = Math.min(dropoffHour, 22); // Cap at 22:00 if staying same day, otherwise can be any time next day
+  }
+  
+  const dropoffTime = `${String(dropoffHour).padStart(2, "0")}:00`;
 
   return {
     pickupDate,
@@ -103,42 +98,79 @@ function SearchRides() {
   const watchedPickupDate = form.watch("pickupDate");
   const watchedDropoffDate = form.watch("dropoffDate");
   const watchedPickupTime = form.watch("pickupTime");
+  const watchedDropoffTime = form.watch("dropoffTime");
 
   useEffect(() => {
-    const { pickupDate, dropoffDate, pickupTime } = form.getValues();
+    const { pickupDate, dropoffDate, pickupTime, dropoffTime } = form.getValues();
 
-    if (!pickupDate || !dropoffDate) {
+    if (!pickupDate || !pickupTime) {
       return;
     }
-    const minDropoffDate = new Date(pickupDate);
-    minDropoffDate.setDate(pickupDate.getDate() + 1);
-    minDropoffDate.setHours(0, 0, 0, 0);
 
+    // If no dropoff date is set, set it to pickup date (allow same-day)
+    if (!dropoffDate) {
+      form.setValue("dropoffDate", new Date(pickupDate));
+      return;
+    }
+
+    // Ensure dropoff date is not before pickup date
     const currentDropoffDate = new Date(dropoffDate);
     currentDropoffDate.setHours(0, 0, 0, 0);
+    const currentPickupDate = new Date(pickupDate);
+    currentPickupDate.setHours(0, 0, 0, 0);
 
-    if (currentDropoffDate < minDropoffDate) {
-        form.setValue("dropoffDate", minDropoffDate);
-        return;
-    }
-
-    const dropoffTime = form.getValues("dropoffTime");
-    if (!pickupTime || !dropoffTime) {
+    if (currentDropoffDate < currentPickupDate) {
+      form.setValue("dropoffDate", new Date(pickupDate));
       return;
     }
 
-    const nextDayAfterPickup = new Date(pickupDate);
-    nextDayAfterPickup.setDate(pickupDate.getDate() + 1);
+    // Handle time validation for same-day bookings (minimum 6 hours)
+    if (!dropoffTime) {
+      return;
+    }
 
-    if (isSameDay(dropoffDate, nextDayAfterPickup)) {
-      const [pickupHour] = pickupTime.split(':').map(Number);
-      const [dropoffHour] = dropoffTime.split(':').map(Number);
-
-      if (dropoffHour < pickupHour) {
-        form.setValue("dropoffTime", ""); 
+    // Check if it's same day booking
+    const isSameDayBooking = isSameDay(pickupDate, dropoffDate);
+    
+    if (isSameDayBooking) {
+      const [pickupHour, pickupMinute] = pickupTime.split(":").map(Number);
+      const [dropoffHour, dropoffMinute] = dropoffTime.split(":").map(Number);
+      
+      const pickupMinutes = pickupHour * 60 + pickupMinute;
+      const dropoffMinutes = dropoffHour * 60 + dropoffMinute;
+      
+      // Check if dropoff is at least 6 hours after pickup
+      const minimumDropoffMinutes = pickupMinutes + (6 * 60); // 6 hours = 360 minutes
+      
+      if (dropoffMinutes < minimumDropoffMinutes) {
+        // If minimum dropoff time exceeds 22:00 (22 * 60 = 1320 minutes), move to next day
+        if (minimumDropoffMinutes > 22 * 60) {
+          const nextDay = new Date(pickupDate);
+          nextDay.setDate(pickupDate.getDate() + 1);
+          form.setValue("dropoffDate", nextDay);
+          
+          // Set a reasonable time for next day (could be the overflow time or a default like 09:00)
+          const overflowMinutes = minimumDropoffMinutes - (24 * 60);
+          if (overflowMinutes > 0) {
+            const overflowHours = Math.floor(overflowMinutes / 60);
+            const remainingMinutes = overflowMinutes % 60;
+            const newDropoffTime = `${overflowHours.toString().padStart(2, '0')}:${remainingMinutes.toString().padStart(2, '0')}`;
+            form.setValue("dropoffTime", newDropoffTime);
+          } else {
+            // Set to a reasonable morning time if no overflow
+            form.setValue("dropoffTime", "09:00");
+          }
+        } else {
+          // Set minimum dropoff time on same day
+          const minHours = Math.floor(minimumDropoffMinutes / 60);
+          const minMinutes = minimumDropoffMinutes % 60;
+          const newDropoffTime = `${minHours.toString().padStart(2, '0')}:${minMinutes.toString().padStart(2, '0')}`;
+          form.setValue("dropoffTime", newDropoffTime);
+        }
       }
     }
-  }, [watchedPickupDate, watchedDropoffDate, watchedPickupTime, form]);
+    // For different day bookings, no time restrictions apply
+  }, [watchedPickupDate, watchedDropoffDate, watchedPickupTime, watchedDropoffTime, form]);
 
   const { filters } = useMotorcycleStore();
   const branches = filters.distinctCities;
@@ -233,11 +265,12 @@ function SearchRides() {
                               selected={field.value}
                               onSelect={(date) => {
                                 field.onChange(date);
-                                if (
-                                  date &&
-                                  form.getValues("dropoffDate") < date
-                                ) {
-                                  form.setValue("dropoffDate", date);
+                                if (date) {
+                                  // Allow same-day booking, but if current dropoff is before pickup, set to same day
+                                  const currentDropoff = form.getValues("dropoffDate");
+                                  if (!currentDropoff || currentDropoff < date) {
+                                    form.setValue("dropoffDate", new Date(date));
+                                  }
                                 }
                                 setPickupDateOpen(false);
                               }}
@@ -339,7 +372,12 @@ function SearchRides() {
                                 field.onChange(date);
                                 setDropoffDateOpen(false);
                               }}
-                              disabled={(date) => date < watchedPickupDate}
+                              disabled={(date) => {
+                                // Allow same day booking - just disable dates before pickup date
+                                const minDate = new Date(watchedPickupDate);
+                                minDate.setHours(0, 0, 0, 0);
+                                return date < minDate;
+                              }}
                             />
                           </PopoverContent>
                         </Popover>

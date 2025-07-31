@@ -310,8 +310,8 @@ const addOrUpdateMotorcycleToCart = asyncHandler(
     const totalDurationHours =
       (dropoffDateTime.getTime() - pickupDateTime.getTime()) / (1000 * 60 * 60);
 
-    if (totalDurationHours < 24) {
-      throw new ApiError(400, "Minimum booking duration is 24 hours.");
+    if (totalDurationHours < 6) {
+      throw new ApiError(400, "Minimum booking duration is 6 hours.");
     }
 
     const {
@@ -334,18 +334,18 @@ const addOrUpdateMotorcycleToCart = asyncHandler(
       weekendCount * motorcycle.pricePerDayFriSun;
 
     // Add charges for partial days
-    if (extraHours > 0) {
-      const partialDayPrice =
-        lastDayTypeForExtraHours === "weekday"
-          ? motorcycle.pricePerDayMonThu
-          : motorcycle.pricePerDayFriSun;
+if (extraHours > 0) {
+  const partialDayPrice =
+    lastDayTypeForExtraHours === "weekday"
+      ? motorcycle.pricePerDayMonThu
+      : motorcycle.pricePerDayFriSun;
 
-      if (extraHours <= 4) {
-        calculatedRent += 0.1 * partialDayPrice;
-      } else {
-        calculatedRent += partialDayPrice;
-      }
-    }
+  if (extraHours >= 5) {
+    calculatedRent += partialDayPrice;
+  } else {
+    calculatedRent += partialDayPrice * 0.1 * extraHours;
+  }
+}
 
     const rentAmount = calculatedRent * quantity;
     const taxPercentage = motorcycle.categories.includes(

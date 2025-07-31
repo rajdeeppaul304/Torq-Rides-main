@@ -133,95 +133,138 @@ export default function MotorcycleDetailPage() {
     });
   }, [inCart, cartForm]);
 
+  // Updated useEffect for handling date/time validation
   useEffect(() => {
-    const { pickupDate, dropoffDate, pickupTime } = cartForm.getValues();
+    const { pickupDate, dropoffDate, pickupTime, dropoffTime } = cartForm.getValues();
 
-    if (!pickupDate || !dropoffDate) {
-      return;
-    }
-    const minDropoffDate = new Date(pickupDate);
-    minDropoffDate.setDate(pickupDate.getDate() + 1);
-    minDropoffDate.setHours(0, 0, 0, 0);
-
-    const currentDropoffDate = new Date(dropoffDate);
-    currentDropoffDate.setHours(0, 0, 0, 0);
-
-    if (currentDropoffDate < minDropoffDate) {
-      cartForm.setValue("dropoffDate", minDropoffDate);
+    if (!pickupDate || !pickupTime) {
       return;
     }
 
-    const dropoffTime = cartForm.getValues("dropoffTime");
-    if (!pickupTime || !dropoffTime) {
+    // If no dropoff date is set, set it to pickup date initially
+    if (!dropoffDate) {
+      cartForm.setValue("dropoffDate", pickupDate);
       return;
     }
 
-    const nextDayAfterPickup = new Date(pickupDate);
-    nextDayAfterPickup.setDate(pickupDate.getDate() + 1);
-
-    if (isSameDay(dropoffDate, nextDayAfterPickup)) {
-      const [pickupHour] = pickupTime.split(":").map(Number);
-      const [dropoffHour] = dropoffTime.split(":").map(Number);
-
-      if (dropoffHour < pickupHour) {
-        cartForm.setValue("dropoffTime", "");
+    // Check if it's same day booking
+    const isSameDayBooking = isSameDay(pickupDate, dropoffDate);
+    
+    if (isSameDayBooking && pickupTime && dropoffTime) {
+      const [pickupHour, pickupMinute] = pickupTime.split(":").map(Number);
+      const [dropoffHour, dropoffMinute] = dropoffTime.split(":").map(Number);
+      
+      const pickupMinutes = pickupHour * 60 + pickupMinute;
+      const dropoffMinutes = dropoffHour * 60 + dropoffMinute;
+      
+      // Check if dropoff is at least 6 hours after pickup
+      const minimumDropoffMinutes = pickupMinutes + (6 * 60); // 6 hours = 360 minutes
+      
+      if (dropoffMinutes < minimumDropoffMinutes) {
+        // If minimum dropoff time exceeds 24:00, move to next day
+        if (minimumDropoffMinutes >= 24 * 60) {
+          const nextDay = new Date(pickupDate);
+          nextDay.setDate(pickupDate.getDate() + 1);
+          cartForm.setValue("dropoffDate", nextDay);
+          
+          // Set dropoff time to the overflow hours
+          const overflowMinutes = minimumDropoffMinutes - (24 * 60);
+          const overflowHours = Math.floor(overflowMinutes / 60);
+          const remainingMinutes = overflowMinutes % 60;
+          const newDropoffTime = `${overflowHours.toString().padStart(2, '0')}:${remainingMinutes.toString().padStart(2, '0')}`;
+          cartForm.setValue("dropoffTime", newDropoffTime);
+        } else {
+          // Set minimum dropoff time on same day
+          const minHours = Math.floor(minimumDropoffMinutes / 60);
+          const minMinutes = minimumDropoffMinutes % 60;
+          const newDropoffTime = `${minHours.toString().padStart(2, '0')}:${minMinutes.toString().padStart(2, '0')}`;
+          cartForm.setValue("dropoffTime", newDropoffTime);
+        }
       }
-    }
-  }, [watchedPickupDate, watchedDropoffDate, watchedPickupTime, cartForm]);
-
-  const calculateTotalCost = () => {
-    if (
-      !motorcycle ||
-      !watchedPickupDate ||
-      !watchedDropoffDate ||
-      !watchedPickupTime ||
-      !watchedDropoffTime ||
-      !watchedQuantity
-    ) {
-      return { totalCost: 0, duration: "N/A" };
-    }
-
-    const bookingPeriod = getBookingPeriod(
-      watchedPickupDate,
-      watchedPickupTime,
-      watchedDropoffDate,
-      watchedDropoffTime
-    );
-
-    if (bookingPeriod.totalHours <= 0) {
-      return { totalCost: 0, duration: "0 days 0 hours" };
-    }
-
-    const { weekdayCount, weekendCount, extraHours, lastDayTypeForExtraHours } =
-      bookingPeriod;
-
-    let totalCost = 0;
-    totalCost += weekdayCount * motorcycle.pricePerDayMonThu;
-    totalCost += weekendCount * motorcycle.pricePerDayFriSun;
-
-    if (extraHours > 0) {
-      const extraHourRate =
-        lastDayTypeForExtraHours === "weekday"
-          ? motorcycle.pricePerDayMonThu
-          : motorcycle.pricePerDayFriSun;
-      if (extraHours <= 4) {
-        totalCost += extraHourRate * 0.1; 
-      } else {
-        totalCost += extraHourRate;
+    } else if (!isSameDayBooking) {
+      // For multi-day bookings, ensure dropoff date is not before pickup date
+      if (dropoffDate < pickupDate) {
+        cartForm.setValue("dropoffDate", pickupDate);
       }
+      // For different day bookings, no time restrictions apply
+      // User can select any time on the dropoff day
     }
+  }, [watchedPickupDate, watchedDropoffDate, watchedPickupTime, watchedDropoffTime, cartForm]);
 
-    return {
-      totalCost: totalCost * watchedQuantity,
-      duration: bookingPeriod.duration,
-    };
-  };
+const calculateTotalCost = () => {
+   if (
+     !motorcycle ||
+     !watchedPickupDate ||
+     !watchedDropoffDate ||
+     !watchedPickupTime ||
+     !watchedDropoffTime ||
+     !watchedQuantity
+   ) {
+     return { totalCost: 0, duration: "N/A" };
+   }
 
+   const bookingPeriod = getBookingPeriod(
+     watchedPickupDate,
+     watchedPickupTime,
+     watchedDropoffDate,
+     watchedDropoffTime
+   );
+
+   if (bookingPeriod.totalHours <= 0) {
+     return { totalCost: 0, duration: "0 days 0 hours" };
+   }
+
+   const { weekdayCount, weekendCount, extraHours, lastDayTypeForExtraHours } =
+     bookingPeriod;
+
+   let totalCost = 0;
+   totalCost += weekdayCount * motorcycle.pricePerDayMonThu;
+   totalCost += weekendCount * motorcycle.pricePerDayFriSun;
+
+   if (extraHours > 0) {
+     const extraHourRate =
+       lastDayTypeForExtraHours === "weekday"
+         ? motorcycle.pricePerDayMonThu
+         : motorcycle.pricePerDayFriSun;
+     if (extraHours >= 5) {
+       totalCost += extraHourRate;
+     } else {
+       totalCost += extraHourRate * 0.1 * extraHours; 
+     }
+   }
+
+   return {
+     totalCost: totalCost * watchedQuantity,
+     duration: bookingPeriod.duration,
+   };
+ };
+ 
   const { totalCost, duration } = calculateTotalCost();
 
   const onCartSubmit = async (data: AddToCartFormData) => {
     if (user?.role === UserRolesEnum.ADMIN) {
       toast.error("Admin's Cannot add to Cart !!");
+      return;
+    }
+
+    // Validate minimum 6-hour booking
+    const { pickupDate, dropoffDate, pickupTime, dropoffTime } = data;
+    
+    // Create datetime objects for accurate comparison
+    const pickupDateTime = new Date(pickupDate);
+    const [pickupHour, pickupMinute] = pickupTime.split(":").map(Number);
+    pickupDateTime.setHours(pickupHour, pickupMinute, 0, 0);
+    
+    const dropoffDateTime = new Date(dropoffDate);
+    const [dropoffHour, dropoffMinute] = dropoffTime.split(":").map(Number);
+    dropoffDateTime.setHours(dropoffHour, dropoffMinute, 0, 0);
+    
+    // Calculate the difference in milliseconds, then convert to hours
+    const timeDifferenceMs = dropoffDateTime.getTime() - pickupDateTime.getTime();
+    const timeDifferenceHours = timeDifferenceMs / (1000 * 60 * 60);
+    
+    if (timeDifferenceHours < 6) {
+      toast.error("Minimum booking duration is 6 hours!");
       return;
     }
 
@@ -515,6 +558,9 @@ export default function MotorcycleDetailPage() {
           <Card className="sticky top-4">
             <CardHeader>
               <CardTitle>Book This Motorcycle</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Minimum booking duration: 6 hours
+              </p>
             </CardHeader>
             <CardContent>
               <Form {...cartForm}>
@@ -557,12 +603,6 @@ export default function MotorcycleDetailPage() {
                                 selected={field.value}
                                 onSelect={(date) => {
                                   field.onChange(date);
-                                  if (
-                                    date &&
-                                    cartForm.getValues("dropoffDate") < date
-                                  ) {
-                                    cartForm.setValue("dropoffDate", date);
-                                  }
                                   setPickupDateOpen(false);
                                 }}
                                 disabled={(date) =>
